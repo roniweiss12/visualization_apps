@@ -1,5 +1,5 @@
 ## roniweiss12's mercury apps
-This repository contains code to mymercury apps, made to visualize multiomics data.
+This repository contains code to my shiny/mercury visualization apps, made to visualize multiomics data.
 
 # Current apps:
 1. view_contacts: This app is made to show Hi-C contact map and profile of user input's genomic coordinates.
