@@ -1,17 +1,11 @@
 library(shiny)
 library(readr)
 library(stringr)
-library(ggplot2)
 library(tidyr)
 library(dplyr)
 library(reshape2)
-library(ggsignif)
 library(coin)
-library(RColorBrewer)
-library(colorspace)
-library(bslib)
-library(gridExtra)
-library(highcharter)
+library(plotly)
 
 AGGREGATE_COLS <-c( "E11.5_XY_1","E11.5_XY_2","E11.5_XY_3","E11.5_XX_1","E11.5_XX_2","E11.5_XX_3",
                     "E12.5_XY_1","E12.5_XY_2","E12.5_XY_3","E12.5_XX_1","E12.5_XX_2","E12.5_XX_3",
@@ -47,7 +41,7 @@ melt_data <- function(tpm_matrix) {
   return(group_means_melted)
 }
 
-TPM_FILE <- "TPM_allGenes/230606_ALL_rsem.merged.gene_tpm.csv"
+TPM_FILE <- "230606_ALL_rsem.merged.gene_tpm.csv"
 
 tpm_matrix <- read.table(TPM_FILE, sep = ',', header = TRUE)
 tpm_matrix <- clean_matrix(tpm_matrix)
@@ -72,43 +66,24 @@ ui <- fluidPage(
       helpText("Show gene specific expression (in TPM)."),
       
       # Allow multiple gene selections
-      selectizeInput("gene_name", 
+      selectizeInput("gene_name",
                      label = "Choose gene name(s):",
                      choices = ord_mtx$gene_id,
                      selected = c("Amh"),
-                     multiple = TRUE)
+                     multiple = TRUE),
+      width = 2
     ),
     
-    mainPanel(highchartOutput('scatterPlot'), htmlOutput('boxPlot'))
+    mainPanel(
+      htmlOutput('gridScatter'),
+      htmlOutput('gridBox'),
+      width = 10
+    )
   )
 )
 
-
 # Define server logic ----
 server <- function(input, output) {
-  # Define export options
-  export <- list(
-    list(
-      text = "PNG",
-      onclick = JS("function () {
-                   this.exportChart({ type: 'image/png' }); }")
-    ),
-    list(
-      text = "JPEG",
-      onclick = JS("function () {
-                   this.exportChart({ type: 'image/jpeg' }); }")
-    ),
-    list(
-      text = "SVG",
-      onclick = JS("function () {
-                   this.exportChart({ type: 'image/svg+xml' }); }")
-    ),
-    list(
-      text = "PDF",
-      onclick = JS("function () {
-                   this.exportChart({ type: 'application/pdf' }); }")
-    )
-  )
   sort_data <- function(data, genes_names){
     # Filter data for selected genes
     data <- group_means_melted[group_means_melted$gene_id %in% genes_names, ]
@@ -135,7 +110,7 @@ server <- function(input, output) {
       gene_id = character(),
       p_value = numeric(),
       Day = numeric(),
-      stringsAsFactors = FALSE
+      stringsAsFactors = FALSE # Optional: Avoid automatic conversion to factors
     )
     # # show difference between cell type at each time point
     for (day in unique(data$Day)) {
@@ -147,101 +122,114 @@ server <- function(input, output) {
       p_df <- rbind(p_df, p_values)
     }
     p_df <- p_df[order(p_df$Day), ]
+    alpha_levels <- c(0.05, 0.01)
+    p_df$label <- ifelse(p_df$p_value >= alpha_levels[1], "-ns-",
+                             ifelse(p_df$p_value >= alpha_levels[2], "-*-", "-**-"))
     return(p_df)
   }
-  output$boxPlot <- renderUI({
-    plots <- c()
-    for (gene in input$gene_name) {
-      data <- sort_data(data, gene)
-      
-      gene_id_list <- unique(data$gene_id)
-      
-      myboxplotData <- lapply(gene_id_list, function(gene) {
-        subset_data <- subset(data, gene_id == gene)
-        data_to_boxplot(subset_data, Expression, Cell_Type, Day) %>%
-          mutate(id = gene)  # Add Gene_ID as a column
-      })
-      myboxplotData <- bind_rows(myboxplotData)
-      myboxplotData$name <- paste(myboxplotData$id, myboxplotData$name, sep = " - ")
-      myboxplotData$name <- gsub("(.*?) - ", "<i>\\1</i> - ", myboxplotData$name)
-      combined_colors <- get_color_pallete(data$gene_id)
-      p_values <- get_pval(data)
-      alpha_levels <- c(0.05, 0.01)
-      p_values$label <- ifelse(p_values$p_value >= alpha_levels[1], "-ns-",
-                               ifelse(p_values$p_value >= alpha_levels[2], "-*-", "-**-"))
-      data <- data[order(data$Day), ]
-      unique_days <- unique(data$Day)
-      maxExpression <- max(data$Expression)
-      hc <- highchart() %>%
-        hc_colors(unlist(combined_colors)) %>%
-        hc_xAxis(categories = unique_days, title = list(text = "Day"))%>%
-        hc_add_series_list(myboxplotData)%>%
-        hc_xAxis(title = list(text = "Embryonic day"))%>%
-        hc_yAxis(title = list(text = "Expression (TPM)"))%>%
-        hc_title(text= paste("<i>", unique(data$gene_id), "</i>", "gonadal expression")) %>%
-        hc_legend(enabled= TRUE)%>%
-        hc_plotOptions(area = list(relativeXValue = TRUE))%>%
-        hc_exporting(
-          enabled = TRUE,
-          formAttributes = list(target = "_blank"),
-          buttons = list(contextButton = list(
-            text = "Export",
-            theme = list(fill = "transparent"),
-            menuItems = export))) %>%
-        hc_chart(backgroundColor = "#ffffff")%>%
-        hc_annotations(
-          list(labels = list(
-              list(point = list(x = 0, y = maxExpression*1.1, xAxis = 0, yAxis = 0), text = as.character(p_values$label[1])),
-              list(point = list(x = 1, y = maxExpression*1.1, xAxis = 0, yAxis = 0), text = as.character(p_values$label[2])),
-              list(point = list(x = 2, y = maxExpression*1.1, xAxis = 0, yAxis = 0), text = as.character(p_values$label[3])),
-              list(point = list(x = 3, y = maxExpression*1.1, xAxis = 0, yAxis = 0), text = as.character(p_values$label[4]))
-            ), labelOptions = list(backgroundColor = "white", borderColor = "white")))
-      plots <- c(plots, list(hc))
-    }
-    hw_grid(plots)
-  })
-  output$scatterPlot <- renderHighchart({
-    if (is.null(input$gene_name) || input$gene_name == "") {
-      return(tags$p("Please choose genes"))
-    }
+  colors <- function(){
+    return(c("#E7BCDE", "#86B6F6"))
+  }
+  output$gridScatter <- renderUI({
     data <- sort_data(data, input$gene_name)
-    combined_colors <- get_color_pallete(data$gene_id)
     # Combine the Cell_Type and gene_id columns to create a new column for grouping
     data$group <- interaction(data$gene_id, data$Cell_Type)
-    data$group <- gsub("\\.", " - ", data$group)
     data <- data[order(data$Day), ]
     unique_days <- as.numeric(unique(data$Day))
-    genes <- paste0(unique(data$gene_id), collapse = ', ')
-    plot_title <- paste("<i>", genes, "</i>", "gonadal expression")
+    # make genes names italic
+    subtitles <- paste0("<i>", input$gene_name, "</i>")
+    # Reorder data based on sorted_gene_id otherwise the plots will be alphabetical and the titles not...
+    sorted_gene_id <- unique(data$gene_id)[order(match(unique(data$gene_id), input$gene_name))]
+    data <- data[order(match(data$gene_id, sorted_gene_id)), ]
+    plots <- c()
+    plots <- lapply(unique(data$gene_id), function(gene) {
+      gene_data <- data[data$gene_id == gene,]
+      scatter_plot <- plot_ly(x = ~gene_data$Day, y = ~gene_data$Expression,
+                              type = 'scatter', mode = 'markers', color = ~gene_data$Cell_Type, colors = colors(), 
+                              legendgroup=~gene_data$Cell_Type, 
+                              showlegend = ifelse(gene == unique(data$gene_id)[1], TRUE, FALSE)) 
+      scatter_plot <- scatter_plot %>% 
+        add_trace(y = ~gene_data$Expression_mean,
+                  mode = 'lines', name = ~gene_data$Cell_Type, color = ~gene_data$Cell_Type,
+                  showlegend = FALSE) %>% 
+        layout(xaxis = list(title = list(text ='Embryonic day')), 
+               yaxis = list(title = list(text ='Expression (TPM)')))
+    })
+    num_plots <- length(plots)
+    num_cols <- 2  # Number of columns in the subplot grid
 
-    # Plot scatter and line
-    highchart() %>%
-      hc_colors(unlist(combined_colors)) %>%
-      hc_add_series(data, "line", 
-                    hcaes(x = as.numeric(Day), y = Expression_mean, 
-                          group = group),
-                    marker = list(enabled = FALSE)) %>%
-      hc_add_series(data, "scatter", 
-                    hcaes(x = as.numeric(Day), y = Expression, 
-                          group = group), 
-                    dataLabels = list(enabled = FALSE),
-                    showInLegend = FALSE) %>%
-      hc_yAxis(title = list(text = "Expression (TPM)")) %>%
-      hc_xAxis(tickPositions = unique_days, title = list(text = "Embryonic day")) %>%
-      hc_legend(enabled = TRUE) %>%
-      hc_tooltip(pointFormat = "Day: {point.x}<br/>Expression: {point.y}<br/>") %>%
-      hc_title(text = plot_title) %>%
-      hc_chart(backgroundColor = "#ffffff")%>%
-      hc_exporting(
-        enabled = TRUE,
-        formAttributes = list(target = "_blank"),
-        buttons = list(contextButton = list(
-          text = "Export",
-          theme = list(fill = "transparent"),
-          menuItems = export
-        ))
-      ) 
+    # Calculate the number of rows dynamically
+    num_rows <- ceiling(num_plots / num_cols)
+    fig <- subplot(plots, nrows = num_rows, titleY= TRUE, titleX= TRUE, shareX = TRUE)
+    #set y coordinate of titles
+    title_y <- rev(seq(0, 1, length.out = num_rows + 1)[-1])
+    annotations <- lapply(seq_along(plots), function(i) {
+      list(x = ifelse(length(plots) == 1, 0.5, ifelse(i %% 2 == 0, 0.75, 0.25)),
+           y = ifelse(i <= 2, 1, title_y[ceiling(i/2)]-0.075),
+           text = subtitles[i],
+           xref = "paper",
+           yref = "paper",
+           xanchor = "center",
+           yanchor = "bottom",
+           showarrow = FALSE)})
+    config(fig, toImageButtonOptions = list(format= 'svg', filename= 'plot',
+                                            height= 800, width= 1200,
+                                            scale= 1 )) %>%
+      layout(annotations = annotations)
   })
+  output$gridBox <- renderUI({
+    data <- sort_data(data, input$gene_name)
+    data <- data[order(data$Day), ]
+    subtitles <- paste0("<i>", input$gene_name, "</i>")
+    sorted_gene_id <- unique(data$gene_id)[order(match(unique(data$gene_id), input$gene_name))]
+    data <- data[order(match(data$gene_id, sorted_gene_id)), ]
+    plots <- c()
+    plots <- lapply(unique(data$gene_id), function(gene) {
+      gene_data <- data[data$gene_id == gene,]
+      p_values <- get_pval(gene_data)
+      gene_data <- gene_data %>%
+        left_join(p_values, by = c("Day", "gene_id")) %>%
+        select(-Day, -gene_id)      
+      gene_data$maxExp <- 1.01 * max(gene_data$Expression)
+      box <- plot_ly(x = ~gene_data$Day, y = ~gene_data$Expression,
+                     type = 'box', color = ~gene_data$Cell_Type, colors = colors(), 
+                     legendgroup=~gene_data$Cell_Type, 
+                     showlegend = ifelse(gene == unique(data$gene_id)[1], TRUE, FALSE)) %>%
+        layout(boxmode = "group")
+      box <- box %>% add_trace(y = ~gene_data$maxExp, type = 'scatter',
+              mode = 'text', text = ~gene_data$label, textposition = 'middle right',
+              textfont = list(color = '#000000', size = 10), showlegend = FALSE)
+      box <- box %>%
+        layout(xaxis = list(title = list(text ='Embryonic day')), 
+               yaxis = list(title = list(text ='Expression (TPM)')))
+    })
+    num_plots <- length(plots)
+    num_cols <- 2  # Number of columns in the subplot grid
+    
+    # Calculate the number of rows dynamically
+    num_rows <- ceiling(num_plots / num_cols)
+    fig <- subplot(plots, nrows = num_rows, titleY= TRUE, titleX= TRUE, shareX = TRUE)
+    #set y coordinate of titles
+    title_y <- rev(seq(0, 1, length.out = num_rows + 1)[-1])
+    annotations <- lapply(seq_along(plots), function(i) {
+      list(x = ifelse(length(plots) == 1, 0.5, ifelse(i %% 2 == 0, 0.75, 0.25)),
+           y = ifelse(i <= 2, 1, title_y[ceiling(i/2)]),
+           text = subtitles[i],
+           xref = "paper",
+           yref = "paper",
+           xanchor = "center",
+           yanchor = "bottom",
+           showarrow = FALSE)})
+
+    config(fig, toImageButtonOptions = list(format= 'svg', filename= 'plot',
+                                            height= 800, width= 1200,
+                                            scale= 1 )) %>%
+      layout(annotations = annotations)
+ })
 }
+
 # Run the app ----
 shinyApp(ui = ui, server = server)
+
+# library(rsconnect)
+# deployApp()
