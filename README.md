@@ -6,3 +6,4 @@ This repository contains code for my shiny/mercury visualization apps, made to v
     Data is generated from .mcool files.
    Notice this app is meant to compare two conditions/cell types, so the map isn't symmetrical.
 2. RNA-seq visualization tool: This app visualizes expression data (TPM) of two conditions/cell types in both scatter plot and box plots with statistical significance annotations. It allows you to choose multiple genes at once to compare between them.
+3. VEP_viewer: Variant effect prediction viewer. This app visualizes the effect of the variant using a scatter plot of the original TFBS score vs the score in the mutated sequence, for each variant in the "quality DSD variants" table.
