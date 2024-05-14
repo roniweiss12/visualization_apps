@@ -41,10 +41,13 @@ def get_scatter_data(row):
     return data
 
 def handle_original_df(df):
+    #show index starting from 1
     df.reset_index(inplace=True)
     df.rename(columns={'index': 'variant_id'}, inplace=True)
     df['variant_id'] = df['variant_id'].apply(lambda x: x+1)
+    #convert boolean to str
     df['contains_human_cells'] = df['contains_human_cells'].astype(str)
     df['contains_mouse_cells'] = df['contains_mouse_cells'].astype(str)
+    #put commas in numbers
     df['distance_from_nearest_DSD_gene'] = df['distance_from_nearest_DSD_gene'].apply(lambda x: "{:,.0f}".format(float(x)))
     return df
