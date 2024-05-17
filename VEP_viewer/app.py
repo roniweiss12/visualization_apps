@@ -8,8 +8,9 @@ import seaborn as sns
 from handle_df import get_scatter_data, handle_original_df
 
 DF_FILE = "qualityDSD_variants_effect_prediction.tsv"
+# DF_FILE = "/dsi/gonen-lab/shared_files/WGS_on_DSD/data/pipeline_outputs/variants_with_layers/2024-05-07/qualityDSD_variants_effect_prediction_no_thresh.tsv"
 COLUMNS = ["variant_id","CHROM", "POS", "REF", "ALT", 'AF_popmax', 'geneHancer', 'TAD', "distance_from_nearest_DSD_gene",
-            "INTERVAL_ID", "total_probands", "probands_names", "healthy_members", "healthy_names",
+            "INTERVAL_ID", "TFBS_delta", "total_probands", "probands_names", "healthy_members", "healthy_names",
             "conservation", "conservation_4way", "in_exon", "gene_name_of_exon", "gonad_exon",
             "contains_human_cells", "contains_mouse_cells"]
 
@@ -30,19 +31,19 @@ app_ui = ui.page_fillable(
     ui.layout_columns(
         ui.card(
             ui.input_checkbox_group("filter_options", label="Choose filter(s)", choices=["Index", "TAD", "Interval_ID"], inline=True),
-            ui.input_select("index_filter", label="Filter by index", choices=["All"] + list(df['variant_id'].astype(str).unique())),
-            ui.input_select("tad_filter", label="Filter by TAD", choices=["All"] + sorted(df['TAD'].unique())),
-            ui.input_select("interval_filter", label="Filter by interval ID", choices=["All"] + list(df['INTERVAL_ID'].unique())),
+            ui.input_selectize("index_filter", label="Filter by index", choices=["All"] + list(df['variant_id'].astype(str).unique())),
+            ui.input_selectize("tad_filter", label="Filter by TAD", choices=["All"] + sorted(df['TAD'].unique())),
+            ui.input_selectize("interval_filter", label="Filter by interval ID", choices=["All"] + list(df['INTERVAL_ID'].unique())),
             height="800px"
         ),
         ui.card(output_widget("plot_scatter"), height="400px"),
         ui.card(ui.output_data_frame("summary_data"), height="400px"),
         
         col_widths=[3, 9, 12]
-        #row_heights=[4, 2],
     ),
 )
 def server(input, output, session):
+    
     def apply_filters():
         filters = input.filter_options()
         filtered_df = df.copy()
