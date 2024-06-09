@@ -6,6 +6,9 @@ library(dplyr)
 library(reshape2)
 library(coin)
 library(plotly)
+library(bslib)
+library(shinyjs)
+
 
 AGGREGATE_COLS <-c( "E11.5_XY_1","E11.5_XY_2","E11.5_XY_3","E11.5_XX_1","E11.5_XX_2","E11.5_XX_3",
                     "E12.5_XY_1","E12.5_XY_2","E12.5_XY_3","E12.5_XX_1","E12.5_XX_2","E12.5_XX_3",
@@ -57,8 +60,7 @@ group_means <- aggregate(tpm_matrix[,AGGREGATE_COLS],
 group_means_melted <- melt_data(tpm_matrix)
 
 # Define UI ----
-ui <- fluidPage(
-  
+ui <- fillPage(
   titlePanel("RNA Seq Results"),
   
   sidebarLayout(
@@ -76,9 +78,17 @@ ui <- fluidPage(
     
     mainPanel(
       htmlOutput('gridScatter'),
-      htmlOutput('gridBox'),
-      width = 10
+      width = 10  # Set width to 12 to occupy entire page
     )
+  ),
+  
+  tags$head(
+    tags$style(HTML("
+      #gridScatter {
+        height: 90vh;
+        overflow-y: auto;
+      }
+    "))
   )
 )
 
@@ -124,7 +134,7 @@ server <- function(input, output) {
     p_df <- p_df[order(p_df$Day), ]
     alpha_levels <- c(0.05, 0.01)
     p_df$label <- ifelse(p_df$p_value >= alpha_levels[1], "-ns-",
-                             ifelse(p_df$p_value >= alpha_levels[2], "-*-", "-**-"))
+                         ifelse(p_df$p_value >= alpha_levels[2], "-*-", "-**-"))
     return(p_df)
   }
   colors <- function(){
@@ -144,6 +154,11 @@ server <- function(input, output) {
     plots <- c()
     plots <- lapply(unique(data$gene_id), function(gene) {
       gene_data <- data[data$gene_id == gene,]
+      p_values <- get_pval(gene_data)
+      gene_data <- gene_data %>%
+        left_join(p_values, by = c("Day", "gene_id")) %>%
+        select(-Day, -gene_id)      
+      gene_data$maxExp <- 1.01 * max(gene_data$Expression)
       scatter_plot <- plot_ly(x = ~gene_data$Day, y = ~gene_data$Expression,
                               type = 'scatter', mode = 'markers', color = ~gene_data$Cell_Type, colors = colors(), 
                               legendgroup=~gene_data$Cell_Type, 
@@ -153,11 +168,15 @@ server <- function(input, output) {
                   mode = 'lines', name = ~gene_data$Cell_Type, color = ~gene_data$Cell_Type,
                   showlegend = FALSE) %>% 
         layout(xaxis = list(title = list(text ='Embryonic day')), 
-               yaxis = list(title = list(text ='Expression (TPM)')))
+               yaxis = list(title = list(text ='TPM')), 
+               height = 800) %>%
+        add_trace(y = ~gene_data$maxExp, type = 'scatter',
+                  mode = 'text', text = ~gene_data$label, textposition = 'middle',
+                  textfont = list(color = '#000000', size = 10), showlegend = FALSE)
     })
     num_plots <- length(plots)
     num_cols <- 2  # Number of columns in the subplot grid
-
+    
     # Calculate the number of rows dynamically
     num_rows <- ceiling(num_plots / num_cols)
     fig <- subplot(plots, nrows = num_rows, titleY= TRUE, titleX= TRUE, shareX = TRUE)
@@ -171,6 +190,7 @@ server <- function(input, output) {
            yref = "paper",
            xanchor = "center",
            yanchor = "bottom",
+           font = list(size = 22),
            showarrow = FALSE)})
     config(fig, toImageButtonOptions = list(format= 'svg', filename= 'plot',
                                             height= 800, width= 1200,
@@ -191,17 +211,15 @@ server <- function(input, output) {
         left_join(p_values, by = c("Day", "gene_id")) %>%
         select(-Day, -gene_id)      
       gene_data$maxExp <- 1.01 * max(gene_data$Expression)
-      box <- plot_ly(x = ~gene_data$Day, y = ~gene_data$Expression,
-                     type = 'box', color = ~gene_data$Cell_Type, colors = colors(), 
-                     legendgroup=~gene_data$Cell_Type, 
+      box <- plot_ly(gene_data, x = ~Day, y = ~Expression, color = ~Cell_Type, colors = colors(), 
+                     type = 'box', legendgroup = ~Cell_Type, facet_col = ~gene_id,
                      showlegend = ifelse(gene == unique(data$gene_id)[1], TRUE, FALSE)) %>%
-        layout(boxmode = "group")
-      box <- box %>% add_trace(y = ~gene_data$maxExp, type = 'scatter',
-              mode = 'text', text = ~gene_data$label, textposition = 'middle right',
-              textfont = list(color = '#000000', size = 10), showlegend = FALSE)
+      add_trace(y = ~gene_data$maxExp, type = 'scatter',
+                               mode = 'text', text = ~gene_data$label, textposition = 'middle',
+                               textfont = list(color = '#000000', size = 10), showlegend = FALSE)
       box <- box %>%
         layout(xaxis = list(title = list(text ='Embryonic day')), 
-               yaxis = list(title = list(text ='Expression (TPM)')))
+               yaxis = list(title = list(text ='TPM')))
     })
     num_plots <- length(plots)
     num_cols <- 2  # Number of columns in the subplot grid
@@ -213,19 +231,19 @@ server <- function(input, output) {
     title_y <- rev(seq(0, 1, length.out = num_rows + 1)[-1])
     annotations <- lapply(seq_along(plots), function(i) {
       list(x = ifelse(length(plots) == 1, 0.5, ifelse(i %% 2 == 0, 0.75, 0.25)),
-           y = ifelse(i <= 2, 1, title_y[ceiling(i/2)]),
+           y = ifelse(i <= 2, 1, title_y[ceiling(i/2)]-0.05),
            text = subtitles[i],
            xref = "paper",
            yref = "paper",
            xanchor = "center",
            yanchor = "bottom",
            showarrow = FALSE)})
-
+    
     config(fig, toImageButtonOptions = list(format= 'svg', filename= 'plot',
                                             height= 800, width= 1200,
                                             scale= 1 )) %>%
       layout(annotations = annotations)
- })
+  })
 }
 
 # Run the app ----
